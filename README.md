@@ -1,6 +1,14 @@
 # svngrab
 Export and merge paths from SVN repositories
 
+## Installation
+
+Use the `go get` tool:
+
+```
+go get -v github.com/ardnew/svngrab
+```
+
 ## Usage
 
 `svngrab` performs all of its operations according to the contents of a configuration file in YAML format.
