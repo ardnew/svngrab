@@ -1,5 +1,12 @@
+[docimg]:https://godoc.org/github.com/ardnew/svngrab?status.svg
+[docurl]:https://godoc.org/github.com/ardnew/svngrab
+[repimg]:https://goreportcard.com/badge/github.com/ardnew/svngrab
+[repurl]:https://goreportcard.com/report/github.com/ardnew/svngrab
+
 # svngrab
-Export and merge paths from SVN repositories
+### Export and merge paths from SVN repositories
+
+[![GoDoc][docimg]][docurl] [![Go Report Card][repimg]][repurl]
 
 ## Installation
 
