@@ -36,14 +36,19 @@ const (
 	DefaultDirExistsAction = copy.Merge
 )
 
-var PathVariable = map[string]string{
-	"${DATE}":     time.Now().Local().Format("20060102"),
-	"${DATETIME}": time.Now().Local().Format("20060102-150405"),
+var Variable = map[string]string{
+	"$DATE":     time.Now().Local().Format("20060102"),
+	"$DATETIME": time.Now().Local().Format("20060102-150405"),
 }
 
 // Run executes the main program logic using the given log and configuration
 // file path.
-func Run(l *log.Log, path string) error {
+func Run(l *log.Log, path string, vars map[string]string) error {
+
+	// copy the user variables definitions into our variable map.
+	for ident, value := range vars {
+		Variable[ident] = value
+	}
 
 	// parse the configuration file if it is valid YAML format.
 	l.Infof("conf", "parsing configuration file: %s ...", path)
@@ -58,6 +63,14 @@ func Run(l *log.Log, path string) error {
 
 	// verify we can connect to each of the repository objects.
 	for name, expo := range cfg.Export {
+
+		// perform string replacement with variables on the name and export fields.
+		for ident, value := range Variable {
+			name = strings.ReplaceAll(name, ident, value)
+			expo.Repo = strings.ReplaceAll(expo.Repo, ident, value)
+			expo.Path = strings.ReplaceAll(expo.Path, ident, value)
+			expo.Local = strings.ReplaceAll(expo.Local, ident, value)
+		}
 
 		l.Infof("repo", "initializing repostiory: %s ...", name)
 		rep, err := repo.New(expo)
@@ -109,8 +122,8 @@ func Run(l *log.Log, path string) error {
 	// walk over each declared output package
 	for pkgPath, pkg := range cfg.Package {
 
-		// perform string replacement with path variables on the package path.
-		for ident, value := range PathVariable {
+		// perform string replacement with variables on the package path.
+		for ident, value := range Variable {
 			pkgPath = strings.ReplaceAll(pkgPath, ident, value)
 		}
 
@@ -122,6 +135,10 @@ func Run(l *log.Log, path string) error {
 			var incList config.IncludePathList
 
 			for path, list := range inc { // only 1 key-value pair
+				// perform string replacement with variables on the include path.
+				for ident, value := range Variable {
+					path = strings.ReplaceAll(path, ident, value)
+				}
 				srcPath = path
 				incList = list
 				if rep, isRepo := reps[path]; isRepo {
@@ -133,6 +150,14 @@ func Run(l *log.Log, path string) error {
 			for _, op := range incList {
 				// check if there is a copy operation
 				if cp := op.Copy; cp.Repo != "" && cp.Package != "" {
+					// perform string replacement with variables on the copy fields.
+					for ident, value := range Variable {
+						cp.Repo = strings.ReplaceAll(cp.Repo, ident, value)
+						cp.Package = strings.ReplaceAll(cp.Package, ident, value)
+						for i := range cp.Ignore {
+							cp.Ignore[i] = strings.ReplaceAll(cp.Ignore[i], ident, value)
+						}
+					}
 					src, dst, opt, err := copyOptions(srcPath, pkgPath, cp)
 					l.Infof("copy", "%s -> %s", src, dst)
 					if nil == err {
@@ -148,6 +173,11 @@ func Run(l *log.Log, path string) error {
 
 		// create a compressed archive of the package if the output path is defined.
 		if pkg.Compress.Output != "" {
+			// perform string replacement with variables on the output path.
+			for ident, value := range Variable {
+				pkg.Compress.Output =
+					strings.ReplaceAll(pkg.Compress.Output, ident, value)
+			}
 			arcPath, arc, err := makeArchiver(pkgPath, pkg.Compress)
 			l.Infof("pack", "%s -> %s", pkgPath, arcPath)
 			if nil == err {
@@ -286,10 +316,6 @@ func makeArchiver(pkgPath string, cfg config.CompressConfig) (string, archiver.A
 	}
 
 	if nil == err {
-		// perform string replacement with path variables on the output path.
-		for ident, value := range PathVariable {
-			cfg.Output = strings.ReplaceAll(cfg.Output, ident, value)
-		}
 		if nil != arc.CheckExt(cfg.Output) {
 			// remove existing extension if it exists, to replace with proper one
 			if e := filepath.Ext(cfg.Output); "" != e {

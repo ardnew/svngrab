@@ -11,6 +11,8 @@ import (
 )
 
 // Type definitions for various errors raised by config package.
+
+// Type definitions for various errors raised by config package.
 type (
 	DirectoryNotFoundError  string
 	ConfigFileNotFoundError string
