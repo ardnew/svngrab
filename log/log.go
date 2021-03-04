@@ -68,5 +68,6 @@ func (l *Log) Eolf(class string, err error, format string, args ...interface{}) 
 	l.Break()
 	if nil != err {
 		l.Errorf(class, "%s", err.Error())
+		l.Break()
 	}
 }

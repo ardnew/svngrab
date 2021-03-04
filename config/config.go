@@ -48,8 +48,8 @@ func (e FileExistsError) Error() string {
 // export and how to package them.
 type Config struct {
 	path    string
-	Export  ExportMap  `yaml:"export"`
-	Package PackageMap `yaml:"package"`
+	Export  ExportMap  `yaml:"export,omitempty"`
+	Package PackageMap `yaml:"package,omitempty"`
 }
 
 // ExportMap represents named SVN repository paths to export.
@@ -62,7 +62,7 @@ type ExportConfig struct {
 	Repo  string `yaml:"repo"`
 	Path  string `yaml:"path"`
 	Local string `yaml:"local"`
-	Last  string `yaml:"last"`
+	Last  string `yaml:"last,omitempty"`
 }
 
 // urlProtocol is a regular expression that matches protocol string prefixes of
@@ -98,9 +98,9 @@ type PackageMap map[string]PackageConfig
 
 // PackageConfig represents the configuration for a single package destination.
 type PackageConfig struct {
-	Roster   bool           `yaml:"roster"`
-	Include  IncludeList    `yaml:"include"`
-	Compress CompressConfig `yaml:"compress"`
+	Roster   bool           `yaml:"roster,omitempty"`
+	Include  IncludeList    `yaml:"include,omitempty"`
+	Compress CompressConfig `yaml:"compress,omitempty"`
 }
 
 // IncludeList represents the list of repositories to include in a package.
@@ -110,18 +110,24 @@ type IncludeList []IncludeMap
 // configurations.
 type IncludeMap map[string]IncludePathList
 
-// IncludePathList contains a list of mapping configurations for a single
+// IncludePathList contains a list of mapping operations for a single
 // repository.
-type IncludePathList []IncludePathConfig
+type IncludePathList []IncludePathOp
 
-// IncludePathConfig represents a mapping configuration for a single path in a
+// IncludePathOp represents the available operations and their respective
+// configurations which can be performed on a path included with a package.
+type IncludePathOp struct {
+	Copy IncludeCopyConfig `yaml:"copy,flow,omitempty"`
+}
+
+// IncludeCopyConfig represents a mapping configuration for a single path in a
 // repository to its destination path in a package.
-type IncludePathConfig struct {
+type IncludeCopyConfig struct {
 	Repo     string   `yaml:"repo"`
 	Package  string   `yaml:"package"`
-	Conflict string   `yaml:"conflict"`
-	Symlinks string   `yaml:"symlinks"`
-	Ignore   []string `yaml:"ignore"`
+	Conflict string   `yaml:"conflict,omitempty"`
+	Symlinks string   `yaml:"symlinks,omitempty"`
+	Ignore   []string `yaml:"ignore,flow,omitempty"`
 }
 
 // CompressConfig represents the configuration for a single compressed archive.

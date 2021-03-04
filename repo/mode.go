@@ -12,5 +12,5 @@ const (
 
 // String returns the string representation of the receiver ExportMode.
 func (m ExportMode) String() string {
-	return []string{"update", "checkout"}[m]
+	return []string{"diff", "pull"}[m]
 }

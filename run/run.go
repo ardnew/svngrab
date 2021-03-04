@@ -4,22 +4,30 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ardnew/svngrab/config"
 	"github.com/ardnew/svngrab/log"
 	"github.com/ardnew/svngrab/repo"
 
+	"github.com/mholt/archiver/v3"
 	"github.com/otiai10/copy"
 )
 
 // Type definitions for various errors raised by run package.
 type (
-	InvalidIgnorePattern string
+	InvalidIgnorePattern  string
+	InvalidCompressMethod string
 )
 
 // Error returns the string representation of InvalidIgnorePattern
 func (e InvalidIgnorePattern) Error() string {
 	return "invalid ignore pattern: " + string(e)
+}
+
+// Error returns the string representation of InvalidCompressMethod
+func (e InvalidCompressMethod) Error() string {
+	return "invalid compress method: " + string(e)
 }
 
 // Constants defining default behaviors for file copy operations.
@@ -28,14 +36,19 @@ const (
 	DefaultDirExistsAction = copy.Merge
 )
 
+var PathVariable = map[string]string{
+	"${DATE}":     time.Now().Local().Format("20060102"),
+	"${DATETIME}": time.Now().Local().Format("20060102-150405"),
+}
+
 // Run executes the main program logic using the given log and configuration
 // file path.
 func Run(l *log.Log, path string) error {
 
 	// parse the configuration file if it is valid YAML format.
-	l.Infof("config", "parsing configuration file: %s ... ", path)
+	l.Infof("conf", "parsing configuration file: %s ...", path)
 	cfg, err := config.Parse(path)
-	l.Eolf("config", err, "ok")
+	l.Eolf("conf", err, " (ok)")
 	if nil != err {
 		return err
 	}
@@ -46,40 +59,61 @@ func Run(l *log.Log, path string) error {
 	// verify we can connect to each of the repository objects.
 	for name, expo := range cfg.Export {
 
-		l.Infof("repo", "initializing repostiory: %s ... ", name)
+		l.Infof("repo", "initializing repostiory: %s ...", name)
 		rep, err := repo.New(expo)
-		l.Eolf("repo", err, "ok")
+		l.Eolf("repo", err, " (ok)")
 		if nil != err {
 			return err
 		}
 
-		l.Infof("connect", "checking repository status: %s ... ", name)
+		l.Infof("ping", "checking repository status: %s ...", name)
 		_, err = rep.IsConnected()
-		l.Eolf("connect", err, "online")
+		l.Eolf("ping", err, " (online)")
 		if nil != err {
 			return err
 		}
 
+		// install the repository reference in our map so that it can be referenced
+		// in the package rules.
 		reps[name] = rep
 	}
 
 	// export each of the repositories to a local working directory.
-	for _, rep := range reps {
+	for name, rep := range reps {
 		var vers string
 		mode, _ := rep.Exporter()
-		l.Infof(mode.String(), "%s -> %s ", rep.Remote(), rep.LocalPath())
+		l.Infof(mode.String(), "%s -> %s", rep.Remote(), rep.LocalPath())
 		err := rep.Export()
 		if nil == err {
 			vers, err = rep.Revision()
 		}
-		l.Eolf(mode.String(), err, "(%s)", vers)
+		l.Eolf(mode.String(), err, " (%s)", vers)
 		if nil != err {
 			return err
 		}
+		// update the last revision in the Config struct
+		if expo, ok := cfg.Export[name]; ok {
+			expo.Last = vers
+			cfg.Export[name] = expo
+		}
+	}
+
+	// parse the configuration file if it is valid YAML format.
+	l.Infof("conf", "writing repository revisions: %s ...", path)
+	err = cfg.Write()
+	l.Eolf("conf", err, " (ok)")
+	if nil != err {
+		return err
 	}
 
 	// walk over each declared output package
 	for pkgPath, pkg := range cfg.Package {
+
+		// perform string replacement with path variables on the package path.
+		for ident, value := range PathVariable {
+			pkgPath = strings.ReplaceAll(pkgPath, ident, value)
+		}
+
 		// walk over each repository we are copying content from for the current
 		// output package.
 		for _, inc := range pkg.Include {
@@ -95,18 +129,33 @@ func Run(l *log.Log, path string) error {
 				}
 			}
 
-			// walk over each copy mapping for the current repository in the current
-			// package.
-			for _, item := range incList {
-				src, dst, opt, err := copyOptions(srcPath, pkgPath, item)
-				l.Infof("copy", "%s -> %s", src, dst)
-				if nil == err {
-					err = copy.Copy(src, dst, opt)
+			// walk over each include operation for the current repository.
+			for _, op := range incList {
+				// check if there is a copy operation
+				if cp := op.Copy; cp.Repo != "" && cp.Package != "" {
+					src, dst, opt, err := copyOptions(srcPath, pkgPath, cp)
+					l.Infof("copy", "%s -> %s", src, dst)
+					if nil == err {
+						err = copy.Copy(src, dst, opt)
+					}
+					l.Eolf("copy", err, " (ok)")
+					if nil != err {
+						return err
+					}
 				}
-				l.Eolf("copy", err, "")
-				if nil != err {
-					return err
-				}
+			}
+		}
+
+		// create a compressed archive of the package if the output path is defined.
+		if pkg.Compress.Output != "" {
+			arcPath, arc, err := makeArchiver(pkgPath, pkg.Compress)
+			l.Infof("pack", "%s -> %s", pkgPath, arcPath)
+			if nil == err {
+				err = arc.Archive([]string{pkgPath}, arcPath)
+			}
+			l.Eolf("pack", err, " (ok)")
+			if nil != err {
+				return err
 			}
 		}
 	}
@@ -114,7 +163,7 @@ func Run(l *log.Log, path string) error {
 	return nil
 }
 
-func copyOptions(srcPath, pkgPath string, cfg config.IncludePathConfig) (string, string, copy.Options, error) {
+func copyOptions(srcPath, pkgPath string, cfg config.IncludeCopyConfig) (string, string, copy.Options, error) {
 	// if repo path is not an asbolute path, append it to the repository local
 	// working copy path.
 	src := cfg.Repo
@@ -185,4 +234,70 @@ func skipFunc(ignore ...string) (func(string) bool, error) {
 		}
 		return false
 	}, nil
+}
+
+func makeArchiver(pkgPath string, cfg config.CompressConfig) (string, archiver.Archiver, error) {
+
+	var (
+		arc archiver.Archiver
+		ext string
+		err error
+	)
+
+	// create an archiver for the declared compression method
+	switch strings.ToLower(cfg.Method) {
+	case "zip", ".zip":
+		ext = ".zip"
+		arc = &archiver.Zip{
+			CompressionLevel:       cfg.Level,
+			OverwriteExisting:      cfg.Overwrite,
+			MkdirAll:               true,
+			SelectiveCompression:   true,
+			ImplicitTopLevelFolder: false,
+			ContinueOnError:        false,
+		}
+
+	case "gz", ".gz", "tgz", ".tgz", "targz", "tar.gz", ".tar.gz":
+		ext = ".tar.gz"
+		arc = &archiver.TarGz{
+			CompressionLevel: cfg.Level,
+			Tar: &archiver.Tar{
+				OverwriteExisting:      cfg.Overwrite,
+				MkdirAll:               true,
+				ImplicitTopLevelFolder: false,
+				ContinueOnError:        false,
+			},
+		}
+
+	case "bz2", ".bz2", "tbz", ".tbz", "tbz2", ".tbz2", "tarbz2", "tar.bz2", ".tar.bz2":
+		ext = ".tar.bz2"
+		arc = &archiver.TarBz2{
+			CompressionLevel: cfg.Level,
+			Tar: &archiver.Tar{
+				OverwriteExisting:      cfg.Overwrite,
+				MkdirAll:               true,
+				ImplicitTopLevelFolder: false,
+				ContinueOnError:        false,
+			},
+		}
+
+	default:
+		err = InvalidCompressMethod(cfg.Method)
+	}
+
+	if nil == err {
+		// perform string replacement with path variables on the output path.
+		for ident, value := range PathVariable {
+			cfg.Output = strings.ReplaceAll(cfg.Output, ident, value)
+		}
+		if nil != arc.CheckExt(cfg.Output) {
+			// remove existing extension if it exists, to replace with proper one
+			if e := filepath.Ext(cfg.Output); "" != e {
+				cfg.Output = strings.TrimSuffix(cfg.Output, e)
+			}
+			cfg.Output += ext
+		}
+	}
+
+	return cfg.Output, arc, err
 }
