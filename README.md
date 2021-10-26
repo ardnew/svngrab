@@ -10,10 +10,18 @@
 
 ## Installation
 
+#### Go modules: Go version 1.13 and later
+Use the `go install` tool:
+
+```
+go install -v github.com/ardnew/svngrab@latest
+```
+
+#### Legacy: Go version 1.12 and earlier 
 Use the `go get` tool:
 
 ```
-go get -v github.com/ardnew/svngrab
+GO111MODULE=off go get -v github.com/ardnew/svngrab
 ```
 
 ## Usage
