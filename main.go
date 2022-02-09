@@ -47,12 +47,15 @@ func usage(set *flag.FlagSet, separated, detailed bool) {
 func main() {
 
 	var configFilePath string
+	var updateFlag bool
 	var helpFlag bool
 
 	flag.StringVar(&configFilePath, "f", filepath.Base(defaultConfigFilePath()),
 		"Use configuration file at `path`")
+	flag.BoolVar(&updateFlag, "u", false,
+		"Stop processing if all working copies are up-to-date")
 	flag.BoolVar(&helpFlag, "h", false,
-		"show the extended help cruft")
+		"Show the extended help cruft")
 	flag.Usage = func() { usage(flag.CommandLine, false, false) }
 	flag.Parse()
 
@@ -79,7 +82,7 @@ func main() {
 
 	vars, _ := userVariables(flag.Args()...)
 
-	switch err := run.Run(log.New(os.Stdout), configFilePath, vars).(type) {
+	switch err := run.Run(log.New(os.Stdout), configFilePath, updateFlag, vars).(type) {
 	case config.DirectoryNotFoundError:
 		os.Exit(10)
 	case config.ConfigFileNotFoundError:
@@ -109,6 +112,8 @@ func main() {
 		os.Exit(23)
 	case run.InvalidIgnorePattern:
 		os.Exit(100)
+	case run.WorkingCopiesUpToDate:
+		os.Exit(2)
 	default:
 		if nil != err {
 			os.Exit(99)

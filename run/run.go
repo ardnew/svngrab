@@ -18,6 +18,7 @@ import (
 type (
 	InvalidIgnorePattern  string
 	InvalidCompressMethod string
+	WorkingCopiesUpToDate bool
 )
 
 // Error returns the string representation of InvalidIgnorePattern
@@ -28,6 +29,11 @@ func (e InvalidIgnorePattern) Error() string {
 // Error returns the string representation of InvalidCompressMethod
 func (e InvalidCompressMethod) Error() string {
 	return "invalid compress method: " + string(e)
+}
+
+// Error returns the string representation of WorkingCopiesUpToDate
+func (e WorkingCopiesUpToDate) Error() string {
+	return "all working copies up-to-date"
 }
 
 // Constants defining default behaviors for file copy operations.
@@ -43,7 +49,7 @@ var Variable = map[string]string{
 
 // Run executes the main program logic using the given log and configuration
 // file path.
-func Run(l *log.Log, path string, vars map[string]string) error {
+func Run(l *log.Log, path string, update bool, vars map[string]string) error {
 
 	// copy the user variables definitions into our variable map.
 	for ident, value := range vars {
@@ -91,6 +97,7 @@ func Run(l *log.Log, path string, vars map[string]string) error {
 		reps[name] = rep
 	}
 
+	didUpdate := false
 	// export each of the repositories to a local working directory.
 	for name, rep := range reps {
 		var vers string
@@ -106,9 +113,20 @@ func Run(l *log.Log, path string, vars map[string]string) error {
 		}
 		// update the last revision in the Config struct
 		if expo, ok := cfg.Export[name]; ok {
+			if expo.Last != vers {
+				didUpdate = true
+			}
 			expo.Last = vers
 			cfg.Export[name] = expo
 		}
+	}
+
+	// return early if user provided update flag -u and we did not update
+	// any working copy.
+	if upToDate := WorkingCopiesUpToDate(update && !didUpdate); upToDate {
+		l.Errorf("conf", "%s", upToDate)
+		l.Break()
+		return upToDate
 	}
 
 	// parse the configuration file if it is valid YAML format.
