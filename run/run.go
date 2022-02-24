@@ -1,6 +1,7 @@
 package run
 
 import (
+	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -43,17 +44,22 @@ const (
 )
 
 var Variable = map[string]string{
-	"$DATE":     time.Now().Local().Format("20060102"),
+	//	"$DATE":     time.Now().Local().Format("20060102"),
 	"$DATETIME": time.Now().Local().Format("20060102-150405"),
 }
 
 // Run executes the main program logic using the given log and configuration
 // file path.
-func Run(l *log.Log, path string, update bool, vars map[string]string) error {
+func Run(l *log.Log, path string, sh *ShellEnv, update bool, vars map[string]string) error {
+
+	// store each of our key-value string pairs to be written into our shell
+	// environment script.
+	defer sh.Close()
 
 	// copy the user variables definitions into our variable map.
 	for ident, value := range vars {
 		Variable[ident] = value
+		sh.Append("Variables", ident, value)
 	}
 
 	// parse the configuration file if it is valid YAML format.
@@ -77,6 +83,14 @@ func Run(l *log.Log, path string, update bool, vars map[string]string) error {
 			expo.Path = strings.ReplaceAll(expo.Path, ident, value)
 			expo.Local = strings.ReplaceAll(expo.Local, ident, value)
 		}
+
+		sh.Append("Repositories", "REPO_"+name+"_URL",
+			strings.TrimRight(expo.Repo, "/")+"/"+strings.TrimLeft(expo.Path, "/"))
+		sh.Append("Repositories", "REPO_"+name+"_LOCAL", expo.Local)
+		// placeholders so we have each repository's entire info grouped together.
+		// the Append method will notice we have a duplicate key.
+		sh.Append("Repositories", "REPO_"+name+"_PREVREV", "")
+		sh.Append("Repositories", "REPO_"+name+"_CURRREV", "")
 
 		l.Infof("repo", "initializing repostiory: %s ...", name)
 		rep, err := repo.New(expo)
@@ -116,6 +130,8 @@ func Run(l *log.Log, path string, update bool, vars map[string]string) error {
 			if expo.Last != vers {
 				didUpdate = true
 			}
+			sh.Append("Repositories", "REPO_"+name+"_PREVREV", expo.Last)
+			sh.Append("Repositories", "REPO_"+name+"_CURRREV", vers)
 			expo.Last = vers
 			cfg.Export[name] = expo
 		}
@@ -127,6 +143,13 @@ func Run(l *log.Log, path string, update bool, vars map[string]string) error {
 		l.Errorf("conf", "%s", upToDate)
 		l.Break()
 		return upToDate
+	}
+
+	l.Infof("envi", "generating shell environment: %s ...", sh.Name)
+	_, err = sh.Commit()
+	l.Eolf("envi", err, " (ok)")
+	if err != nil {
+		return err
 	}
 
 	// parse the configuration file if it is valid YAML format.
@@ -344,4 +367,124 @@ func makeArchiver(pkgPath string, cfg config.CompressConfig) (string, archiver.A
 	}
 
 	return cfg.Output, arc, err
+}
+
+// ShellEnv implements io.WriteCloser and provides storage for the exported
+// shell environment script.
+// It also provides methods for formatting and writing the stored contents.
+type ShellEnv struct {
+	Name   string
+	Writer io.Writer // must never be nil
+	Closer io.Closer // possibly nil (e.g., w = io.Discard)
+
+	env map[string]*shellEnvSection
+}
+
+func (s *ShellEnv) Write(p []byte) (n int, err error) {
+	return s.Writer.Write(p)
+}
+
+func (s *ShellEnv) Close() error {
+	if s.Closer != nil {
+		return s.Closer.Close()
+	}
+	return nil
+}
+
+// Note that the newline character sequence depends on compile-time target OS,
+// which is "\r\n" for Windows, "\n" for everyone else.
+func (s *ShellEnv) String() string {
+	var sb strings.Builder
+	count := 0
+	for sect, env := range s.env {
+		if count++; count > 1 {
+			sb.WriteString(log.Eol)
+		}
+		sb.WriteString("# " + log.Eol)
+		sb.WriteString("# " + sect + log.Eol)
+		sb.WriteString("# " + log.Eol)
+		sb.WriteString(env.String())
+	}
+	return sb.String()
+}
+
+func (s *ShellEnv) Commit() (n int, err error) {
+	// use the Writer member instead of the receiver ShellEnv so that we may take
+	// advantage if the member implements the optimized WriteString method
+	// (because ShellEnv does not/cannot implement WriteString).
+	return io.WriteString(s.Writer, s.String())
+}
+
+var (
+	reWhitespace = regexp.MustCompile("\\s+")
+	reNonidents  = regexp.MustCompile("(^[^A-Z_]|[^A-Z0-9_])")
+	reUnescaped  = regexp.MustCompile("(^|[^\\])([\"`$])")
+)
+
+func (s *ShellEnv) Append(section, key, val string) {
+
+	sect, ok := s.env[section]
+	if !ok {
+		sect = &shellEnvSection{}
+		s.env[section] = sect
+	}
+
+	// Sanitize key for sh-compatible identifiers
+	key = strings.ToUpper(strings.TrimSpace(key))
+	key = reWhitespace.ReplaceAllLiteralString(key, "_")
+	key = reNonidents.ReplaceAllLiteralString(key, "")
+
+	// Sanitize val for being enquoted with double-quotes ("") by inserting
+	// an escape "\" before any symbol that delimits string interpolation.
+	// Note that if the symbol has ANY number of preceding escapes "\", then it
+	// will NOT have an escape inserted! This is a convoluted bug I don't
+	// want to deal with at the moment, as the current behavior seems to
+	// have the least surprising results.
+	val = reUnescaped.ReplaceAllString(val, `${1}\${2}`)
+
+	// check if the given key already exists
+	n := sect.Len()
+	for i := 0; i < n; i++ {
+		if sect.key[i] == key {
+			sect.key[i] = val // found key, update existing value
+			return            // do not add new elements
+		}
+	}
+
+	// add key-value pair to end of section
+	sect.key = append(sect.key, key)
+	sect.val = append(sect.val, val)
+	sect.count++
+}
+
+type shellEnvSection struct {
+	count int
+	key   []string
+	val   []string
+}
+
+func (s *shellEnvSection) Len() int {
+	n := s.count
+	if nk := len(s.key); nk < n {
+		n = nk
+	}
+	if nv := len(s.val); nv < n {
+		n = nv
+	}
+	return n
+}
+
+// String creates a newline-delimited string, with each line containing the
+// elements at that line's index from both key and val, separated by a single
+// equals sign, and with val surrounded by double-quotes. For example:
+//   key[0]="val[0]"
+//   key[1]="val[1]"
+// Note that the newline character sequence depends on compile-time target OS,
+// which is "\r\n" for Windows, "\n" for everyone else.
+func (s *shellEnvSection) String() string {
+	var sb strings.Builder
+	for i, n := 0, s.Len(); i < n; i++ {
+		sb.WriteString(s.key[i] + `="` + s.val[i] + `"` + log.Eol)
+	}
+	return sb.String()
 }

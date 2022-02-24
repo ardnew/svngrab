@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/ardnew/svngrab/repo"
 	"github.com/ardnew/svngrab/run"
 )
+
+const umaskExport = 0022 // octal file mode (----w--w-)
 
 func usage(set *flag.FlagSet, separated, detailed bool) {
 	exe := filepath.Base(executablePath())
@@ -38,7 +41,6 @@ func usage(set *flag.FlagSet, separated, detailed bool) {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "  The following builtin variables are always available, but may be overridden")
 		fmt.Fprintln(os.Stderr, "  with definitions provided as command-line arguments:")
-		fmt.Fprintln(os.Stderr, "  	$DATE       # current local date (\"YYYYMMDD\")")
 		fmt.Fprintln(os.Stderr, "  	$DATETIME   # current local date-time (\"YYYYMMDD-hhmmss\")")
 		fmt.Fprintln(os.Stderr)
 	}
@@ -46,16 +48,22 @@ func usage(set *flag.FlagSet, separated, detailed bool) {
 
 func main() {
 
-	var configFilePath string
-	var updateFlag bool
-	var helpFlag bool
+	var configFilePath string // -f path
+	var helpFlag bool         // -h
+	var quietFlag bool        // -q
+	var updateFlag bool       // -u
+	var exportEnvPath string  // -x path
 
 	flag.StringVar(&configFilePath, "f", filepath.Base(defaultConfigFilePath()),
-		"Use configuration file at `path`")
-	flag.BoolVar(&updateFlag, "u", false,
-		"Stop processing if all working copies are up-to-date")
+		"use configuration [f]ile at `path`")
 	flag.BoolVar(&helpFlag, "h", false,
-		"Show the extended help cruft")
+		"show the extended [h]elp cruft")
+	flag.BoolVar(&quietFlag, "q", false,
+		"[q]uiet, output as little as possible")
+	flag.BoolVar(&updateFlag, "u", false,
+		"if all working copies are [u]p-to-date, exit immediately (code 2)")
+	flag.StringVar(&exportEnvPath, "x", "",
+		"e[x]port results as shell environment script at `path` (or \"-\" stdout, \"+\" stderr)")
 	flag.Usage = func() { usage(flag.CommandLine, false, false) }
 	flag.Parse()
 
@@ -82,7 +90,8 @@ func main() {
 
 	vars, _ := userVariables(flag.Args()...)
 
-	switch err := run.Run(log.New(os.Stdout), configFilePath, updateFlag, vars).(type) {
+	switch err := run.Run(log.New(os.Stdout),
+		configFilePath, makeShellEnv(exportEnvPath), updateFlag, vars).(type) {
 	case config.DirectoryNotFoundError:
 		os.Exit(10)
 	case config.ConfigFileNotFoundError:
@@ -145,6 +154,26 @@ func flagsProvided(set *flag.FlagSet) map[string]flag.Value {
 	m := map[string]flag.Value{}
 	set.Visit(func(f *flag.Flag) { m[f.Name] = f.Value })
 	return m
+}
+
+func makeShellEnv(path string) *run.ShellEnv {
+	switch path {
+	case "":
+		return &run.ShellEnv{Name: "<bitbucket>", Writer: io.Discard, Closer: nil}
+	case "-":
+		return &run.ShellEnv{Name: "<stdout>", Writer: os.Stdout, Closer: os.Stdout}
+	case "+":
+		return &run.ShellEnv{Name: "<stderr>", Writer: os.Stderr, Closer: os.Stderr}
+	default:
+		if err := os.MkdirAll(filepath.Dir(path), umaskExport); err != nil {
+			panic("error: invalid environment export path: " + err.Error())
+		}
+		rw, err := os.Create(path)
+		if err != nil {
+			panic("error: open environment export file for read/write: " + err.Error())
+		}
+		return &run.ShellEnv{Name: path, Writer: rw, Closer: rw}
+	}
 }
 
 func userVariables(argv ...string) (vars map[string]string, args []string) {
