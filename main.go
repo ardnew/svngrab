@@ -159,11 +159,11 @@ func flagsProvided(set *flag.FlagSet) map[string]flag.Value {
 func makeShellEnv(path string) *run.ShellEnv {
 	switch path {
 	case "":
-		return &run.ShellEnv{Name: "<bitbucket>", Writer: io.Discard, Closer: nil}
+		return run.NewShellEnv("<bitbucket>", io.Discard, nil)
 	case "-":
-		return &run.ShellEnv{Name: "<stdout>", Writer: os.Stdout, Closer: os.Stdout}
+		return run.NewShellEnv("<stdout>", os.Stdout, os.Stdout)
 	case "+":
-		return &run.ShellEnv{Name: "<stderr>", Writer: os.Stderr, Closer: os.Stderr}
+		return run.NewShellEnv("<stderr>", os.Stderr, os.Stderr)
 	default:
 		if err := os.MkdirAll(filepath.Dir(path), umaskExport); err != nil {
 			panic("error: invalid environment export path: " + err.Error())
@@ -172,7 +172,7 @@ func makeShellEnv(path string) *run.ShellEnv {
 		if err != nil {
 			panic("error: open environment export file for read/write: " + err.Error())
 		}
-		return &run.ShellEnv{Name: path, Writer: rw, Closer: rw}
+		return run.NewShellEnv(path, rw, rw)
 	}
 }
 

@@ -59,7 +59,7 @@ func Run(l *log.Log, path string, sh *ShellEnv, update bool, vars map[string]str
 	// copy the user variables definitions into our variable map.
 	for ident, value := range vars {
 		Variable[ident] = value
-		sh.Append("Variables", ident, value)
+		sh.Append("input variables", "VAR_"+ident, value)
 	}
 
 	// parse the configuration file if it is valid YAML format.
@@ -84,13 +84,13 @@ func Run(l *log.Log, path string, sh *ShellEnv, update bool, vars map[string]str
 			expo.Local = strings.ReplaceAll(expo.Local, ident, value)
 		}
 
-		sh.Append("Repositories", "REPO_"+name+"_URL",
+		sh.Append(name, "REPO_"+name+"_URL",
 			strings.TrimRight(expo.Repo, "/")+"/"+strings.TrimLeft(expo.Path, "/"))
-		sh.Append("Repositories", "REPO_"+name+"_LOCAL", expo.Local)
+		sh.Append(name, "REPO_"+name+"_LOCAL", expo.Local)
 		// placeholders so we have each repository's entire info grouped together.
 		// the Append method will notice we have a duplicate key.
-		sh.Append("Repositories", "REPO_"+name+"_PREVREV", "")
-		sh.Append("Repositories", "REPO_"+name+"_CURRREV", "")
+		sh.Append(name, "REPO_"+name+"_PREVREV", "")
+		sh.Append(name, "REPO_"+name+"_CURRREV", "")
 
 		l.Infof("repo", "initializing repostiory: %s ...", name)
 		rep, err := repo.New(expo)
@@ -130,11 +130,18 @@ func Run(l *log.Log, path string, sh *ShellEnv, update bool, vars map[string]str
 			if expo.Last != vers {
 				didUpdate = true
 			}
-			sh.Append("Repositories", "REPO_"+name+"_PREVREV", expo.Last)
-			sh.Append("Repositories", "REPO_"+name+"_CURRREV", vers)
+			sh.Append(name, "REPO_"+name+"_PREVREV", expo.Last)
+			sh.Append(name, "REPO_"+name+"_CURRREV", vers)
 			expo.Last = vers
 			cfg.Export[name] = expo
 		}
+	}
+
+	l.Infof("envi", "generating shell environment: %s ...", sh.Name)
+	_, err = sh.Commit()
+	l.Eolf("envi", err, " (ok)")
+	if err != nil {
+		return err
 	}
 
 	// return early if user provided update flag -u and we did not update
@@ -143,13 +150,6 @@ func Run(l *log.Log, path string, sh *ShellEnv, update bool, vars map[string]str
 		l.Errorf("conf", "%s", upToDate)
 		l.Break()
 		return upToDate
-	}
-
-	l.Infof("envi", "generating shell environment: %s ...", sh.Name)
-	_, err = sh.Commit()
-	l.Eolf("envi", err, " (ok)")
-	if err != nil {
-		return err
 	}
 
 	// parse the configuration file if it is valid YAML format.
@@ -377,7 +377,22 @@ type ShellEnv struct {
 	Writer io.Writer // must never be nil
 	Closer io.Closer // possibly nil (e.g., w = io.Discard)
 
-	env map[string]*shellEnvSection
+	section []struct {
+		name string
+		env  *shellEnvSection
+	}
+}
+
+func NewShellEnv(name string, writer io.Writer, closer io.Closer) *ShellEnv {
+	return &ShellEnv{
+		Name:   name,
+		Writer: writer,
+		Closer: closer,
+		section: []struct {
+			name string
+			env  *shellEnvSection
+		}{},
+	}
 }
 
 func (s *ShellEnv) Write(p []byte) (n int, err error) {
@@ -395,15 +410,14 @@ func (s *ShellEnv) Close() error {
 // which is "\r\n" for Windows, "\n" for everyone else.
 func (s *ShellEnv) String() string {
 	var sb strings.Builder
-	count := 0
-	for sect, env := range s.env {
-		if count++; count > 1 {
+	for n, sect := range s.section {
+		if n > 0 {
 			sb.WriteString(log.Eol)
 		}
 		sb.WriteString("# " + log.Eol)
-		sb.WriteString("# " + sect + log.Eol)
+		sb.WriteString("# " + sect.name + log.Eol)
 		sb.WriteString("# " + log.Eol)
-		sb.WriteString(env.String())
+		sb.WriteString(sect.env.String())
 	}
 	return sb.String()
 }
@@ -416,23 +430,37 @@ func (s *ShellEnv) Commit() (n int, err error) {
 }
 
 var (
-	reWhitespace = regexp.MustCompile("\\s+")
-	reNonidents  = regexp.MustCompile("(^[^A-Z_]|[^A-Z0-9_])")
-	reUnescaped  = regexp.MustCompile("(^|[^\\])([\"`$])")
+	reUnderscores = regexp.MustCompile("_+")
+	reNonidents   = regexp.MustCompile("(^[^A-Z_]|[^A-Z0-9_]+)")
+	//reUnescaped  = regexp.MustCompile("(^|[^\\])([\"`$])")
 )
 
 func (s *ShellEnv) Append(section, key, val string) {
 
-	sect, ok := s.env[section]
-	if !ok {
-		sect = &shellEnvSection{}
-		s.env[section] = sect
+	var env *shellEnvSection
+	for _, sect := range s.section {
+		if sect.name == section {
+			env = sect.env
+			break
+		}
+	}
+	if env == nil {
+		env = &shellEnvSection{}
+		s.section = append(s.section,
+			struct {
+				name string
+				env  *shellEnvSection
+			}{
+				name: section,
+				env:  env,
+			})
 	}
 
 	// Sanitize key for sh-compatible identifiers
 	key = strings.ToUpper(strings.TrimSpace(key))
-	key = reWhitespace.ReplaceAllLiteralString(key, "_")
-	key = reNonidents.ReplaceAllLiteralString(key, "")
+	key = reNonidents.ReplaceAllLiteralString(key, "_")
+	key = reUnderscores.ReplaceAllLiteralString(key, "_")
+	key = strings.Trim(key, "_")
 
 	// Sanitize val for being enquoted with double-quotes ("") by inserting
 	// an escape "\" before any symbol that delimits string interpolation.
@@ -440,21 +468,21 @@ func (s *ShellEnv) Append(section, key, val string) {
 	// will NOT have an escape inserted! This is a convoluted bug I don't
 	// want to deal with at the moment, as the current behavior seems to
 	// have the least surprising results.
-	val = reUnescaped.ReplaceAllString(val, `${1}\${2}`)
+	//val = reUnescaped.ReplaceAllString(val, `${1}\${2}`)
 
 	// check if the given key already exists
-	n := sect.Len()
+	n := env.Len()
 	for i := 0; i < n; i++ {
-		if sect.key[i] == key {
-			sect.key[i] = val // found key, update existing value
-			return            // do not add new elements
+		if env.key[i] == key {
+			env.val[i] = val // found key, update existing value
+			return           // do not add new elements
 		}
 	}
 
 	// add key-value pair to end of section
-	sect.key = append(sect.key, key)
-	sect.val = append(sect.val, val)
-	sect.count++
+	env.key = append(env.key, key)
+	env.val = append(env.val, val)
+	env.count++
 }
 
 type shellEnvSection struct {
