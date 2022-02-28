@@ -35,8 +35,12 @@ usage:
 
 options:
   -f path
-        Use configuration file at path (default "svngrab.yml")
-  -h    show the extended help cruft
+        use configuration [f]ile at path (default "svngrab.yml")
+  -h    show the extended [h]elp cruft
+  -q    [q]uiet, output as little as possible
+  -u    if all working copies are [u]p-to-date, exit immediately (code 2)
+  -x path
+        e[x]port results as shell environment script at path (or "-" stdout, "+" stderr)
 
 variables:
   Several elements of the configuration file support builtin and user-defined
@@ -51,7 +55,6 @@ variables:
 
   The following builtin variables are always available, but may be overridden
   with definitions provided as command-line arguments:
-        $DATE       # current local date ("YYYYMMDD")
         $DATETIME   # current local date-time ("YYYYMMDD-hhmmss")
 ```
 
