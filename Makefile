@@ -15,7 +15,7 @@ endif
 
 PROJECT   ?= svngrab
 IMPORT    ?= github.com/ardnew/$(PROJECT)
-VERSION   ?= 0.3.2
+VERSION   ?= 0.4.0
 BUILDTIME ?= $(shell date -u '+%FT%TZ')
 PLATFORM  ?= linux-amd64
 
@@ -30,7 +30,7 @@ endif
 
 # Makefile identifiers to export (as strings) via Go linker
 EXPORTS ?= PROJECT IMPORT VERSION BUILDTIME PLATFORM \
-  $(if $(BRANCH),BRANCH,) $(if $(REVISION),REVISION,) 
+  $(if $(BRANCH),BRANCH,) $(if $(REVISION),REVISION,)
 
 # +----------------------------------------------------------------------------+
 # | build paths and project files                                              |
@@ -39,14 +39,14 @@ EXPORTS ?= PROJECT IMPORT VERSION BUILDTIME PLATFORM \
 # if the command being built is different than the project import path, define
 # GOCMD as that import path. this will be used as the output executable when
 # making targets "build", "run", "install", etc. for example, a common practice
-# is to place the project's main package in a "cmd" subdirectory. 
+# is to place the project's main package in a "cmd" subdirectory.
 ifneq "" "$(wildcard cmd/$(PROJECT))"
   # if a directory named PROJECT is found in the "cmd" subdirectory, use it as
   # the main package.
   GOCMD ?= $(IMPORT)/cmd/$(PROJECT)
 else
   # otherwise, GOCMD is undefined, use IMPORT.
-  GOCMD ?= $(IMPORT) 
+  GOCMD ?= $(IMPORT)
 endif
 
 # default output paths
@@ -68,9 +68,9 @@ EXPORTPATH ?= main
 # Paths to remove when all of their contents are removed
 CLEANPARENT ?= $(BINPATH) $(PKGPATH)
 
-#        +==========================================================+           
-#      <||  YOU SHOULD NOT NEED TO MODIFY ANYTHING BELOW THIS LINE  ||>         
-#        +==========================================================+           
+#        +==========================================================+
+#      <||  YOU SHOULD NOT NEED TO MODIFY ANYTHING BELOW THIS LINE  ||>
+#        +==========================================================+
 
 # +----------------------------------------------------------------------------+
 # | constants and derived variables                                            |
@@ -139,10 +139,10 @@ define RUNSH
 #!/bin/sh
 # Description:
 # 	Rebuild and run $(outexe) with command-line arguments.
-# 
+#
 # Usage:
 # 	./$(runsh) [arg ...]
-# 
+#
 if make -s build; then
 	"$(outexe)" "$${@}"
 fi

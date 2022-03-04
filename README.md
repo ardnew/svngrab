@@ -17,7 +17,7 @@ Use the `go install` tool:
 go install -v github.com/ardnew/svngrab@latest
 ```
 
-#### Legacy: Go version 1.12 and earlier 
+#### Legacy: Go version 1.12 and earlier
 Use the `go get` tool:
 
 ```
