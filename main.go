@@ -14,13 +14,27 @@ import (
 	"github.com/ardnew/svngrab/run"
 )
 
+var (
+	PROJECT   string
+	IMPORT    string
+	VERSION   string
+	BUILDTIME string
+	PLATFORM  string
+	BRANCH    string
+	REVISION  string
+)
+
 const umaskExport = 0022 // octal file mode (----w--w-)
 
 func usage(set *flag.FlagSet, separated, detailed bool) {
 	exe := filepath.Base(executablePath())
+	ver := fmt.Sprintf("%s %s %s %s@%s %s",
+		IMPORT, VERSION, PLATFORM, BRANCH, REVISION, BUILDTIME)
 	if separated {
 		fmt.Fprintln(os.Stderr, "--")
 	}
+	fmt.Fprintln(os.Stderr, ver)
+	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  "+exe, "[options]", "[VAR=VAL ...]")
 	fmt.Fprintln(os.Stderr)

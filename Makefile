@@ -15,7 +15,7 @@ endif
 
 PROJECT   ?= svngrab
 IMPORT    ?= github.com/ardnew/$(PROJECT)
-VERSION   ?= 0.4.0
+VERSION   ?= 0.4.1
 BUILDTIME ?= $(shell date -u '+%FT%TZ')
 PLATFORM  ?= linux-amd64
 
